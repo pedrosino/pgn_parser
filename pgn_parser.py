@@ -68,8 +68,9 @@ def parse_time(data, end_time_str, utc_offset_hours):
         #h, m = int(parts[0]), int(parts[1])
         #dt = datetime(2000, 1, 1, h, m) + timedelta(hours=utc_offset_hours)
 
-        tempo = datetime.strptime(time_part, "%H:%M:%S").time() if len(time_part.split(":")) == 3 else datetime.strptime(time_part, "%H:%M").time()
-    
+        tempo = datetime.strptime(time_part, "%H:%M:%S").time()
+        #if len(time_part.split(":")) == 3 else datetime.strptime(time_part, "%H:%M").time()
+
         data_completa = datetime.combine(data, tempo) + timedelta(hours=utc_offset_hours)
         return data_completa #dt.strftime("%H:%M")
     except ValueError:
@@ -119,6 +120,23 @@ def build_month_range(start_month, end_month):
 
     if start_dt > end_dt:
         raise ValueError("O mês final não pode ser anterior ao mês inicial.")
+
+    current = start_dt
+    while current <= end_dt:
+        yield current.year, current.month
+        if current.month == 12:
+            current = datetime(current.year + 1, 1, 1)
+        else:
+            current = datetime(current.year, current.month + 1, 1)
+
+
+def build_month_range_from_dates(start_date, end_date):
+    """Gera a lista de meses entre duas datas, inclusive."""
+    start_dt = start_date.replace(day=1)
+    end_dt = end_date.replace(day=1)
+
+    if start_dt > end_dt:
+        raise ValueError("A data final não pode ser anterior à data inicial.")
 
     current = start_dt
     while current <= end_dt:
@@ -273,46 +291,22 @@ def main():
             st.warning("Preencha o nome de usuário para processar o arquivo.")
     else:
         st.info("Informe o período e o aplicativo buscará os arquivos PGN de cada mês diretamente do chess.com.")
-        current_year = datetime.now().year
-        current_month = datetime.now().month
+        today = datetime.now().date()
+        default_start = today.replace(day=1)
+        default_end = today
 
-        col_start_year, col_start_month, col_end_year, col_end_month = st.columns(4)
-        with col_start_year:
-            start_year = st.selectbox(
-                "Ano inicial",
-                options=list(range(2000, current_year + 1)),
-                index=current_year - 2000,
-            )
-        with col_start_month:
-            start_month = st.selectbox(
-                "Mês inicial",
-                options=list(range(1, 13)),
-                format_func=lambda month: calendar.month_name[month],
-                index=current_month - 1,
-            )
-        with col_end_year:
-            end_year = st.selectbox(
-                "Ano final",
-                options=list(range(2000, current_year + 1)),
-                index=current_year - 2000,
-            )
-        with col_end_month:
-            end_month = st.selectbox(
-                "Mês final",
-                options=list(range(1, 13)),
-                format_func=lambda month: calendar.month_name[month],
-                index=current_month - 1,
-            )
-
-        start_month_value = f"{start_year}-{start_month:02d}"
-        end_month_value = f"{end_year}-{end_month:02d}"
+        col_start, col_end = st.columns(2)
+        with col_start:
+            start_date = st.date_input("Data inicial", value=default_start, format="DD/MM/YYYY")
+        with col_end:
+            end_date = st.date_input("Data final", value=default_end, format="DD/MM/YYYY")
 
         if st.button("Buscar partidas no chess.com", type="primary"):
             if not username.strip():
                 st.warning("Preencha o nome de usuário para buscar as partidas.")
             else:
                 try:
-                    months = list(build_month_range(start_month_value, end_month_value))
+                    months = list(build_month_range_from_dates(start_date, end_date))
                 except ValueError as exc:
                     st.error(str(exc))
                     months = []
