@@ -26,12 +26,12 @@ TIME_CONTROL_MAP = {
 
 TERMINATION_MAP = [
     # Ordem importa: mais específico primeiro
-    ("desistência", "Abandono"),
+    ("desistência", "Desistência"),
     ("abandonada", "Abandono"),
     ("abandono", "Abandono"),
     ("abandoned", "Abandono"),
-    ("resignation", "Abandono"),
-    ("resigned", "Abandono"),
+    ("resignation", "Desistência"),
+    ("resigned", "Desistência"),
     ("xeque-mate", "Xeque-mate"),
     ("checkmate", "Xeque-mate"),
     ("tempo esgotado", "Tempo"),
@@ -161,7 +161,7 @@ def parse_pgn(pgn_text, username, utc_offset):
         result_tag = tags.get("Result", "")
         termination = tags.get("Termination", "")
         time_control = tags.get("TimeControl", "")
-        date_str = tags.get("Date", "")
+        date_str = tags.get("EndDate", "") if tags.get("EndDate", "") != "" else tags.get("Date", "")
         end_time_str = tags.get("EndTime", "")
 
         # Determine player color
@@ -202,7 +202,7 @@ def parse_pgn(pgn_text, username, utc_offset):
             data = date_str
 
         #hora = parse_time(data, end_time_str, utc_offset)
-        
+
         # Move count
         movetext = re.sub(r'\[.*?\]', '', game).strip()
         movetext = re.sub(r'\{[^}]*\}', '', movetext)
