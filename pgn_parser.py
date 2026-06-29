@@ -2,11 +2,15 @@
 Autor: Pedro Santos, feito com ajuda do Claude AI
 Junho de 2026"""
 
-import re
 import io
+import re
 from datetime import datetime, timedelta
-import streamlit as st
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import urlopen
+
 import pandas as pd
+import streamlit as st
 
 TIME_CONTROL_MAP = {
     "600": "Rápida",
@@ -70,6 +74,69 @@ def parse_time(end_time_str, utc_offset_hours):
         elif ":" in time_part:
             return time_part.rsplit(":", 1)[0]
         return time_part
+
+def parse_month_input(value):
+    """Converte um valor como 2025-02, 2025/02 ou 202502 em (ano, mês)."""
+    if value is None:
+        raise ValueError("Informe um mês válido.")
+
+    raw = str(value).strip()
+    if not raw:
+        raise ValueError("Informe um mês válido.")
+
+    match = re.fullmatch(r"(\d{4})[-/](\d{1,2})", raw)
+    if match:
+        year, month = int(match.group(1)), int(match.group(2))
+    else:
+        match = re.fullmatch(r"(\d{6})", raw)
+        if match:
+            year, month = int(raw[:4]), int(raw[4:])
+        else:
+            match = re.fullmatch(r"(\d{1,2})[-/](\d{4})", raw)
+            if match:
+                month, year = int(match.group(1)), int(match.group(2))
+            else:
+                raise ValueError("Use um formato como 2025-02 ou 2025/02.")
+
+    if not 1 <= month <= 12:
+        raise ValueError("O mês deve estar entre 1 e 12.")
+
+    return year, month
+
+
+def build_month_range(start_month, end_month):
+    """Gera a lista de meses entre o início e o fim, inclusive."""
+    start_year, start_month = parse_month_input(start_month)
+    end_year, end_month = parse_month_input(end_month)
+
+    start_dt = datetime(start_year, start_month, 1)
+    end_dt = datetime(end_year, end_month, 1)
+
+    if start_dt > end_dt:
+        raise ValueError("O mês final não pode ser anterior ao mês inicial.")
+
+    current = start_dt
+    while current <= end_dt:
+        yield current.year, current.month
+        if current.month == 12:
+            current = datetime(current.year + 1, 1, 1)
+        else:
+            current = datetime(current.year, current.month + 1, 1)
+
+
+def fetch_pgn_from_chess_com(username, year, month):
+    """Busca o arquivo PGN mensal de um jogador no chess.com."""
+    url = f"https://api.chess.com/pub/player/{quote(username)}/games/{year}/{month:02d}/pgn"
+    try:
+        with urlopen(url, timeout=20) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise RuntimeError(f"Falha ao buscar o PGN {year}/{month:02d}: HTTP {exc.code}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Falha ao buscar o PGN {year}/{month:02d}: {exc}") from exc
+
 
 def parse_pgn(pgn_text, username, utc_offset):
     """Função principal para processar o texto PGN e retornar um DataFrame com as partidas."""
@@ -168,46 +235,109 @@ def main():
     with col_user:
         username = st.text_input("Seu nome de usuário no Chess.com", placeholder="ex: PedroSantosG")
     with col_tz:
-        utc_offset = st.number_input("Fuso horário (UTC)", min_value=-12, max_value=14, value=-3,
-                                    step=1, help="Ex: Brasília = -3")
+        utc_offset = st.number_input(
+            "Fuso horário (UTC)",
+            min_value=-12,
+            max_value=14,
+            value=-3,
+            step=1,
+            help="Ex: Brasília = -3",
+        )
 
-    uploaded = st.file_uploader("Envie o arquivo .pgn", type=["pgn", "txt"])
+    source_mode = st.radio(
+        "Como quer carregar as partidas?",
+        ["Enviar arquivo PGN", "Buscar automaticamente no chess.com"],
+        horizontal=True,
+    )
 
-    if uploaded and username.strip():
-        pgn_text = uploaded.read().decode("utf-8", errors="replace")
+    if source_mode == "Enviar arquivo PGN":
+        uploaded = st.file_uploader("Envie o arquivo .pgn", type=["pgn", "txt"])
 
-        with st.spinner("Processando partidas..."):
-            df = parse_pgn(pgn_text, username.strip(), utc_offset)
+        if uploaded and username.strip():
+            pgn_text = uploaded.read().decode("utf-8", errors="replace")
 
-        st.success(f"✅ {len(df)} partidas encontradas para **{username}**")
+            with st.spinner("Processando partidas..."):
+                df = parse_pgn(pgn_text, username.strip(), utc_offset)
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Vitórias", len(df[df["Resultado"] == "Vitória"]))
-        with col2:
-            st.metric("Derrotas", len(df[df["Resultado"] == "Derrota"]))
-        with col3:
-            st.metric("Empates", len(df[df["Resultado"] == "Empate"]))
+            st.success(f"✅ {len(df)} partidas encontradas para **{username}**")
+            render_results(df, username)
+        elif uploaded and not username.strip():
+            st.warning("Preencha o nome de usuário para processar o arquivo.")
+    else:
+        st.info("Informe o período e o aplicativo buscará os arquivos PGN de cada mês diretamente do chess.com.")
+        col_start, col_end = st.columns(2)
+        with col_start:
+            start_month = st.text_input("Mês inicial", value="2025-02", placeholder="AAAA-MM")
+        with col_end:
+            end_month = st.text_input("Mês final", value="2025-02", placeholder="AAAA-MM")
 
-        st.dataframe(df, width='stretch', hide_index=True)
+        if st.button("Buscar partidas no chess.com", type="primary"):
+            if not username.strip():
+                st.warning("Preencha o nome de usuário para buscar as partidas.")
+            else:
+                try:
+                    months = list(build_month_range(start_month, end_month))
+                except ValueError as exc:
+                    st.error(str(exc))
+                    months = []
 
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Partidas")
-            ws = writer.sheets["Partidas"]
-            col_widths = {"A": 10, "B": 12, "C": 8, "D": 10, "E": 10, "F": 22, "G": 8, "H": 8}
-            for col, width in col_widths.items():
+                if months:
+                    frames = []
+                    with st.spinner("Buscando e processando os arquivos PGN..."):
+                        for year, month in months:
+                            try:
+                                pgn_text = fetch_pgn_from_chess_com(username.strip(), year, month)
+                            except RuntimeError as exc:
+                                st.warning(str(exc))
+                                continue
+
+                            if not pgn_text or not pgn_text.strip():
+                                continue
+
+                            month_df = parse_pgn(pgn_text, username.strip(), utc_offset)
+                            if month_df.empty:
+                                continue
+
+                            month_df = month_df.copy()
+                            month_df.insert(0, "Mês", f"{year:04d}-{month:02d}")
+                            frames.append(month_df)
+
+                    if frames:
+                        df = pd.concat(frames, ignore_index=True)
+                        st.success(f"✅ {len(df)} partidas encontradas para **{username}** no período informado")
+                        render_results(df, username)
+                    else:
+                        st.warning("Nenhum arquivo PGN foi encontrado para esse usuário e período.")
+
+
+def render_results(df, username):
+    """Exibe métricas, dados e botão de download a partir de um DataFrame."""
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Vitórias", len(df[df["Resultado"] == "Vitória"]))
+    with col2:
+        st.metric("Derrotas", len(df[df["Resultado"] == "Derrota"]))
+    with col3:
+        st.metric("Empates", len(df[df["Resultado"] == "Empate"]))
+
+    st.dataframe(df, width='stretch', hide_index=True)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Partidas")
+        ws = writer.sheets["Partidas"]
+        col_widths = {"A": 12, "B": 12, "C": 8, "D": 10, "E": 10, "F": 22, "G": 8, "H": 8, "I": 10}
+        for col, width in col_widths.items():
+            if col <= chr(64 + len(df.columns)):
                 ws.column_dimensions[col].width = width
 
-        output.seek(0)
-        st.download_button(
-            label="📥 Baixar planilha Excel",
-            data=output,
-            file_name=f"partidas_{username}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    elif uploaded and not username.strip():
-        st.warning("Preencha o nome de usuário para processar o arquivo.")
+    output.seek(0)
+    st.download_button(
+        label="📥 Baixar planilha Excel",
+        data=output,
+        file_name=f"partidas_{username}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 if __name__ == "__main__":
     main()

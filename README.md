@@ -1,2 +1,2 @@
-\# Leitor de PGN
+\#Leitor de PGN
 
