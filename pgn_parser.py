@@ -57,17 +57,21 @@ def classify_termination(termination):
     print(f"Warning: Termination '{termination}' not classified.")
     return "?"
 
-def parse_time(end_time_str, utc_offset_hours):
+def parse_time(data, end_time_str, utc_offset_hours):
     """Parse EndTime string, apply UTC offset, return HH:MM string."""
     if not end_time_str:
         return ""
-    # Format: "18:32:28 GMT+0000" or "1:13:03 GMT+0000"
+    # Format: "18:32:28 GMT+0000" or "1:13:03 GMT+0000" or "1:13:03"
     time_part = end_time_str.split(" ")[0]
     try:
-        parts = time_part.split(":")
-        h, m = int(parts[0]), int(parts[1])
-        dt = datetime(2000, 1, 1, h, m) + timedelta(hours=utc_offset_hours)
-        return dt.strftime("%H:%M")
+        #parts = time_part.split(":")
+        #h, m = int(parts[0]), int(parts[1])
+        #dt = datetime(2000, 1, 1, h, m) + timedelta(hours=utc_offset_hours)
+
+        tempo = datetime.strptime(time_part, "%H:%M:%S").time() if len(time_part.split(":")) == 3 else datetime.strptime(time_part, "%H:%M").time()
+    
+        data_completa = datetime.combine(data, tempo) + timedelta(hours=utc_offset_hours)
+        return data_completa #dt.strftime("%H:%M")
     except ValueError:
         # Fallback: return up to first 5 chars but handle short strings
         if len(time_part) >= 5 and time_part[2] == ":":
@@ -190,12 +194,15 @@ def parse_pgn(pgn_text, username, utc_offset):
         # Date
         try:
             date_obj = datetime.strptime(date_str, "%Y.%m.%d")
-            data = date_obj.strftime("%d/%m/%Y")
+            # data = date_obj.strftime("%d/%m/%Y")
+            data_completa = parse_time(date_obj, end_time_str, utc_offset)
+            data = data_completa.strftime("%d/%m/%Y")
+            hora = data_completa.strftime("%H:%M:%S") if data_completa else ""
         except ValueError:
             data = date_str
 
-        hora = parse_time(end_time_str, utc_offset)
-
+        #hora = parse_time(data, end_time_str, utc_offset)
+        
         # Move count
         movetext = re.sub(r'\[.*?\]', '', game).strip()
         movetext = re.sub(r'\{[^}]*\}', '', movetext)
