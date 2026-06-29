@@ -2,6 +2,7 @@
 Autor: Pedro Santos, feito com ajuda do Claude AI
 Junho de 2026"""
 
+import calendar
 import io
 import re
 from datetime import datetime, timedelta
@@ -162,13 +163,13 @@ def parse_pgn(pgn_text, username, utc_offset):
         # Determine player color
         if white.lower() == username.lower():
             cor = "Brancas"
-            my_elo = tags.get("WhiteElo", "")
+            my_elo = int(tags.get("WhiteElo", ""))
         elif black.lower() == username.lower():
             cor = "Pretas"
-            my_elo = tags.get("BlackElo", "")
+            my_elo = int(tags.get("BlackElo", ""))
         else:
             cor = "?"
-            my_elo = ""
+            my_elo = 0
 
         # Determine result
         if result_tag == "1-0":
@@ -265,18 +266,46 @@ def main():
             st.warning("Preencha o nome de usuário para processar o arquivo.")
     else:
         st.info("Informe o período e o aplicativo buscará os arquivos PGN de cada mês diretamente do chess.com.")
-        col_start, col_end = st.columns(2)
-        with col_start:
-            start_month = st.text_input("Mês inicial", value="2025-02", placeholder="AAAA-MM")
-        with col_end:
-            end_month = st.text_input("Mês final", value="2025-02", placeholder="AAAA-MM")
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+
+        col_start_year, col_start_month, col_end_year, col_end_month = st.columns(4)
+        with col_start_year:
+            start_year = st.selectbox(
+                "Ano inicial",
+                options=list(range(2000, current_year + 1)),
+                index=current_year - 2000,
+            )
+        with col_start_month:
+            start_month = st.selectbox(
+                "Mês inicial",
+                options=list(range(1, 13)),
+                format_func=lambda month: calendar.month_name[month],
+                index=current_month - 1,
+            )
+        with col_end_year:
+            end_year = st.selectbox(
+                "Ano final",
+                options=list(range(2000, current_year + 1)),
+                index=current_year - 2000,
+            )
+        with col_end_month:
+            end_month = st.selectbox(
+                "Mês final",
+                options=list(range(1, 13)),
+                format_func=lambda month: calendar.month_name[month],
+                index=current_month - 1,
+            )
+
+        start_month_value = f"{start_year}-{start_month:02d}"
+        end_month_value = f"{end_year}-{end_month:02d}"
 
         if st.button("Buscar partidas no chess.com", type="primary"):
             if not username.strip():
                 st.warning("Preencha o nome de usuário para buscar as partidas.")
             else:
                 try:
-                    months = list(build_month_range(start_month, end_month))
+                    months = list(build_month_range(start_month_value, end_month_value))
                 except ValueError as exc:
                     st.error(str(exc))
                     months = []
